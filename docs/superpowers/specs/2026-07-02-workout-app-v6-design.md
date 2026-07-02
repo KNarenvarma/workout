@@ -150,7 +150,23 @@ Manual, browser-based (no test infra in a single-file static page):
   isolation, xlsx opens in Excel, JSON round-trip, AI prompt content sanity.
 - Verified via Chrome DevTools MCP against the local file before commit.
 
-## 8. Out of scope / future
+## 8. Addendum (user feedback during build, 2026-07-02)
+
+- **Design direction revised:** "Apple-built" quality — pure-black iOS dark theme
+  (#000 / #1C1C1E cards, #FF375F accent, Apple system status colors), system font
+  stack, minimal information density (one hero card on Today, single overdue card
+  max, quiet metadata), time-of-day greeting. Ember/condensed-type direction dropped.
+- **Gesture logging:** set weight/reps and bodyweight are logged with iOS-style
+  scroll-wheel drum pickers (scroll-snap + haptic tick + live PR hint), replacing
+  ± steppers.
+- **Program update (physique-driven):** calves are the user's stated weak point →
+  trained 3×/week: LB1 Standing Calf Raises 4×8–12 (2s stretch pause), LB2 Seated
+  Calf Raises 4×12–20 (soleus), UB2 Calf Raise Finisher 2×15–20. A deep-research
+  pass on hypertrophy evidence informs further tuning (separate report).
+- **First-run empathy:** days before the app's first logged activity are neutral,
+  never "missed"; overdue prompts only look back 3 days and show one card.
+
+## 9. Out of scope / future
 
 - Live Microsoft Graph / OneDrive write sync (needs user's Azure app registration;
   design leaves a clean seam: all persistence goes through `persist()` /
