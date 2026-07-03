@@ -29,13 +29,14 @@ function doPost(e) {
     for (let i = 0; i < raw.length; i += CHUNK) rows.push(["chunk", raw.slice(i, i + CHUNK)]);
     b.getRange(1, 1, rows.length, 2).setValues(rows);
 
-    // 2) readable tabs
+    // 2) readable tabs — generic: any tab the app sends gets written,
+    //    so future app updates never need this script re-deployed
+    const NAMES = { sessions: "Sessions", sets: "Sets", bw: "BodyWeight", prs: "PRs", program: "Program", coach: "Coach" };
     const tabs = payload.rows || {};
-    writeTab_(ss, "Sessions", tabs.sessions);
-    writeTab_(ss, "Sets", tabs.sets);
-    writeTab_(ss, "BodyWeight", tabs.bw);
-    writeTab_(ss, "PRs", tabs.prs);
-    writeTab_(ss, "Program", tabs.program);
+    for (const key in tabs) {
+      const name = NAMES[key] || (key.charAt(0).toUpperCase() + key.slice(1));
+      writeTab_(ss, name, tabs[key]);
+    }
 
     return json_({ ok: true, at: new Date().toISOString() });
   } catch (err) {

@@ -1744,7 +1744,12 @@ function buildRows(){
   });
   const program = [["Workout","Exercise","Sets","Reps","Rest (s)","Muscles"]];
   for (const wk of Object.keys(W)) W[wk].exercises.forEach(ex => program.push([W[wk].label, ex.name, ex.sets, ex.reps, ex.rest, ex.muscle]));
-  return {sessions, sets, bw, prs, program};
+  const coach = [
+    ["AI Coach Report"],
+    ["Copy the big cell below and paste it into ChatGPT / Claude / Gemini — it acts as your trainer."],
+    [buildAIPrompt()]
+  ];
+  return {sessions, sets, bw, prs, program, coach};
 }
 
 // ─── Excel export ───
@@ -1756,7 +1761,8 @@ function exportXlsx(){
       {name: "Sets", rows: r.sets},
       {name: "BodyWeight", rows: r.bw},
       {name: "PRs", rows: r.prs},
-      {name: "Program", rows: r.program}
+      {name: "Program", rows: r.program},
+      {name: "Coach", rows: r.coach}
     ]), "naren-workout.xlsx");
     toast("Workbook downloaded", null, "check");
   } catch(e){ console.error(e); toast("Export failed — see console"); }
