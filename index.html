@@ -544,12 +544,12 @@ function gymName(id){ const g = S.gyms.find(g => g.id === id); return g ? g.name
 function dayGym(k){ return S.days[k]?.gym || "g1"; }
 
 // ─── scheduling engine ───
+// one workout per day: an override REPLACES that day's scheduled workout
+// (displaced workouts are re-placed by placeWorkout's cascade)
 function dueList(k){
-  const list = [];
-  if (S.overrides[k]) list.push(S.overrides[k]);
+  if (S.overrides[k]) return [S.overrides[k]];
   const sched = SCHED[weekdayIdx(k)].workout;
-  if (sched !== "rest" && sched !== S.overrides[k]) list.push(sched);
-  return list;
+  return sched === "rest" ? [] : [sched];
 }
 function ensureDay(k){
   if (!S.days[k]) S.days[k] = {sets: {}};
@@ -610,24 +610,36 @@ function overdueItems(){
   }
   return items;
 }
-// place wk on first date >= startK without an override; returns date or null
-function assignOverride(startK, wk){
-  let k = startK;
-  for (let i = 0; i < 7; i++){
-    if (!S.overrides[k]) { S.overrides[k] = wk; return k; }
-    k = addDays(k, 1);
+// Place wk on the first usable date >= startK. If that day's scheduled workout
+// hasn't been started, it gets displaced and cascades to the next free day —
+// so "do yesterday's upper today" shifts the whole split forward.
+// Returns where wk landed, or null.
+function placeWorkout(startK, wk){
+  let k = startK, carry = wk, landed = null;
+  for (let i = 0; i < 14 && carry; i++, k = addDays(k, 1)){
+    if (S.overrides[k]) continue;                       // day explicitly claimed — skip past it
+    const sched = SCHED[weekdayIdx(k)].workout;
+    if (sched === carry){                               // its own scheduled day — nothing to do
+      if (!landed) landed = k;
+      carry = null;
+      break;
+    }
+    if (sched !== "rest" && setsDoneCount(k, sched) > 0) continue; // already training that day
+    S.overrides[k] = carry;
+    if (!landed) landed = k;
+    carry = sched === "rest" ? null : sched;            // displaced workout continues the chain
   }
-  return null;
+  return landed;
 }
 function resolveOverdue(k, wk, action){
   if (action === "dotoday"){
-    const at = assignOverride(todayKey(), wk);
-    if (!at) return toast("No free slot this week");
+    const at = placeWorkout(todayKey(), wk);
+    if (!at) return toast("No free slot in the next two weeks");
     markDay(k, "pushed");
-    toast(at === todayKey() ? "Moved to today" : "Moved to " + fmtDate(at));
+    toast(at === todayKey() ? "Moved to today — rest of the week shifts" : "Moved to " + fmtDate(at));
   } else if (action === "push"){
-    const at = assignOverride(addDays(todayKey(), 1), wk);
-    if (!at) return toast("No free slot this week");
+    const at = placeWorkout(addDays(todayKey(), 1), wk);
+    if (!at) return toast("No free slot in the next two weeks");
     markDay(k, "pushed");
     toast("Pushed to " + fmtDate(at, {weekday:"short", day:"numeric", month:"short"}));
   } else if (action === "missed"){ markDay(k, "missed"); toast("Marked missed"); }
@@ -1254,9 +1266,11 @@ function skipToday(){
   toast("Skipped — see you tomorrow");
 }
 function pushToday(wk){
-  const at = assignOverride(addDays(todayKey(), 1), wk);
-  if (!at) return toast("No free day in the next week");
-  markDay(todayKey(), "pushed");
+  const tk = todayKey();
+  if (S.overrides[tk] === wk) delete S.overrides[tk];  // un-claim today before re-placing
+  const at = placeWorkout(addDays(tk, 1), wk);
+  if (!at){ if (SCHED[weekdayIdx(tk)].workout !== wk) S.overrides[tk] = wk; return toast("No free day in the next two weeks"); }
+  markDay(tk, "pushed");
   render();
   toast("Pushed to " + fmtDate(at, {weekday:"short", day:"numeric", month:"short"}));
 }
