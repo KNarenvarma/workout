@@ -22,6 +22,14 @@ Calves are trained 3×/week (standing heavy, seated high-rep, short finisher) �
 - **Gyms:** add each gym you train at. Set history and PRs are kept separate per gym, because the same machine loads differently in different places. The set sheet shows "last time here" first and other-gym numbers as reference.
 - **Logging:** tap a set → scroll the weight/reps wheels → Log set. "Same as last time" logs all remaining sets of an exercise in one tap.
 
+## Live sync — Google Sheet
+
+**More → Live sync → Connect** pushes every change to your own Google Sheet a few
+seconds after you make it — cross-device, and the Sheet stays human-readable
+(Sessions / Sets / BodyWeight / PRs / Program tabs) and shareable by link.
+One-time 5-minute setup: [docs/sync/SETUP.md](docs/sync/SETUP.md). On a new
+device: Connect with the same URL → **Pull from Sheet**. Photos stay per-device.
+
 ## Excel + OneDrive
 
 **More → Excel export** downloads `naren-workout.xlsx` with five sheets: Sessions, Sets, BodyWeight, PRs, Program.

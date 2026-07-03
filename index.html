@@ -486,9 +486,10 @@ let S = {
   overrides: {},   // date -> workout key (pushed / moved workouts)
   weights: [],     // [{date, kg}]
   exNotes: {},     // exercise name -> note
-  photos: []       // [{id, date, thumb}]
+  photos: [],      // [{id, date, thumb}]
+  syncUrl: ""      // Google Apps Script web-app endpoint (docs/sync/SETUP.md)
 };
-const PERSISTED = ["version","gyms","currentGym","days","overrides","weights","exNotes","photos"];
+const PERSISTED = ["version","gyms","currentGym","days","overrides","weights","exNotes","photos","syncUrl"];
 
 // ─── date helpers (local time, keys are YYYY-MM-DD) ───
 function pad2(n){ return String(n).padStart(2, "0"); }
@@ -535,6 +536,7 @@ function persist(){
     PERSISTED.forEach(p => out[p] = S[p]);
     localStorage.setItem(KEY_V6, JSON.stringify(out));
   } catch(e){ console.error(e); if (typeof toast === "function") toast("Storage full — change not saved"); }
+  scheduleSync(); // no-op unless a sync URL is connected
 }
 
 // ─── gyms ───
@@ -1654,6 +1656,19 @@ function renderMore(){
     <button class="btn" onclick="exportXlsx()">${ic('download',15)} Download workbook</button>
   </div>`;
 
+  // live sync
+  h += `<div class="card"><div class="card-t">${ic('refresh',16)} Live sync — Google Sheet</div>
+    ${S.syncUrl
+      ? `<div class="sub" style="margin-bottom:12px">Every change lands in your Sheet a few seconds later. ${_syncStatus ? "<b style='color:var(--txt)'>" + esc(_syncStatus) + "</b>" : ""}</div>
+         <div class="btnrow">
+           <button class="btn sm" onclick="pushSync();toast('Syncing…')">Sync now</button>
+           <button class="btn sm" onclick="pullSync()">Pull from Sheet</button>
+         </div>
+         <button class="btn sm ghost" style="margin-top:8px" onclick="disconnectSync()">Disconnect</button>`
+      : `<div class="sub" style="margin-bottom:12px">Connect a Google Sheet and the app pushes every change to it automatically — live, cross-device, and the Sheet stays readable + shareable. One-time 5-minute setup (guide: docs/sync/SETUP.md).</div>
+         <button class="btn" onclick="connectSync()">${ic('refresh',15)} Connect Google Sheet</button>`}
+  </div>`;
+
   // backup
   h += `<div class="card"><div class="card-t">Backup & move devices</div>
     <div class="sub" style="margin-bottom:12px">Your data lives in this browser. Export a backup before switching phone or clearing the browser; import it on the new device. Photos stay on the device they were added on.</div>
@@ -1691,55 +1706,117 @@ function deleteGym(id){
   persist(); render();
 }
 
-// ─── Excel export ───
-function exportXlsx(){
-  try {
-    const dates = Object.keys(S.days).sort();
-    const sessions = [["Date","Day","Workout","Status","Gym","Sets done","Volume (kg)","Note"]];
-    for (const k of dates){
-      const due = dueList(k);
-      const names = due.length ? due.map(w => W[w].label).join(" + ") : (anyTrainingLogged(k) ? "Extra session" : "Rest");
-      const st = dayStatus(k).code;
-      if (st === "rest" && !anyTrainingLogged(k) && !S.days[k].note) continue;
-      let setsDone = 0;
-      for (const wk of Object.keys(S.days[k].sets || {})) setsDone += setsDoneCount(k, wk);
-      sessions.push([k, SCHED[weekdayIdx(k)].day, names, st, gymName(dayGym(k)), setsDone, dayVolume(k), S.days[k].note || ""]);
-    }
-    const sets = [["Date","Workout","Exercise","Set","Weight (kg)","Reps","PR","Gym"]];
-    for (const k of dates){
-      const by = S.days[k].sets || {};
-      for (const wk of Object.keys(by)){
-        if (!W[wk]) continue;
-        for (const ei of Object.keys(by[wk]).sort((a,b) => a - b)){
-          const ex = W[wk].exercises[ei]; if (!ex) continue;
-          for (const si of Object.keys(by[wk][ei]).sort((a,b) => a - b)){
-            const s = by[wk][ei][si];
-            if (s && s.done) sets.push([k, W[wk].label, ex.name, +si + 1, s.w, s.r, s.pr ? "PR" : "", gymName(dayGym(k))]);
-          }
+// ─── row flattening (shared by Excel export + Sheets sync) ───
+function buildRows(){
+  const dates = Object.keys(S.days).sort();
+  const sessions = [["Date","Day","Workout","Status","Gym","Sets done","Volume (kg)","Note"]];
+  for (const k of dates){
+    const due = dueList(k);
+    const names = due.length ? due.map(w => W[w].label).join(" + ") : (anyTrainingLogged(k) ? "Extra session" : "Rest");
+    const st = dayStatus(k).code;
+    if (st === "rest" && !anyTrainingLogged(k) && !S.days[k].note) continue;
+    let setsDone = 0;
+    for (const wk of Object.keys(S.days[k].sets || {})) setsDone += setsDoneCount(k, wk);
+    sessions.push([k, SCHED[weekdayIdx(k)].day, names, st, gymName(dayGym(k)), setsDone, dayVolume(k), S.days[k].note || ""]);
+  }
+  const sets = [["Date","Workout","Exercise","Set","Weight (kg)","Reps","PR","Gym"]];
+  for (const k of dates){
+    const by = S.days[k].sets || {};
+    for (const wk of Object.keys(by)){
+      if (!W[wk]) continue;
+      for (const ei of Object.keys(by[wk]).sort((a,b) => a - b)){
+        const ex = W[wk].exercises[ei]; if (!ex) continue;
+        for (const si of Object.keys(by[wk][ei]).sort((a,b) => a - b)){
+          const s = by[wk][ei][si];
+          if (s && s.done) sets.push([k, W[wk].label, ex.name, +si + 1, s.w, s.r, s.pr ? "PR" : "", gymName(dayGym(k))]);
         }
       }
     }
-    const bw = [["Date","Kg"]];
-    [...S.weights].sort((a,b) => a.date < b.date ? -1 : 1).forEach(w => bw.push([w.date, w.kg]));
-    const prs = [["Exercise","Gym","Weight (kg)","Reps","Date"]];
-    for (const wk of Object.keys(W)) W[wk].exercises.forEach((ex, ei) => {
-      for (const g of S.gyms){
-        const b = bestAt(wk, ei, g.id);
-        if (b) prs.push([ex.name, g.name, b.w, b.r, b.date]);
-      }
-    });
-    const prog = [["Workout","Exercise","Sets","Reps","Rest (s)","Muscles"]];
-    for (const wk of Object.keys(W)) W[wk].exercises.forEach(ex => prog.push([W[wk].label, ex.name, ex.sets, ex.reps, ex.rest, ex.muscle]));
+  }
+  const bw = [["Date","Kg"]];
+  [...S.weights].sort((a,b) => a.date < b.date ? -1 : 1).forEach(w => bw.push([w.date, w.kg]));
+  const prs = [["Exercise","Gym","Weight (kg)","Reps","Date"]];
+  for (const wk of Object.keys(W)) W[wk].exercises.forEach((ex, ei) => {
+    for (const g of S.gyms){
+      const b = bestAt(wk, ei, g.id);
+      if (b) prs.push([ex.name, g.name, b.w, b.r, b.date]);
+    }
+  });
+  const program = [["Workout","Exercise","Sets","Reps","Rest (s)","Muscles"]];
+  for (const wk of Object.keys(W)) W[wk].exercises.forEach(ex => program.push([W[wk].label, ex.name, ex.sets, ex.reps, ex.rest, ex.muscle]));
+  return {sessions, sets, bw, prs, program};
+}
 
+// ─── Excel export ───
+function exportXlsx(){
+  try {
+    const r = buildRows();
     downloadBlob(buildXlsx([
-      {name: "Sessions", rows: sessions},
-      {name: "Sets", rows: sets},
-      {name: "BodyWeight", rows: bw},
-      {name: "PRs", rows: prs},
-      {name: "Program", rows: prog}
+      {name: "Sessions", rows: r.sessions},
+      {name: "Sets", rows: r.sets},
+      {name: "BodyWeight", rows: r.bw},
+      {name: "PRs", rows: r.prs},
+      {name: "Program", rows: r.program}
     ]), "naren-workout.xlsx");
     toast("Workbook downloaded", null, "check");
   } catch(e){ console.error(e); toast("Export failed — see console"); }
+}
+
+// ─── Google Sheets live sync ───
+let _syncTimer = null;
+let _syncStatus = "";   // shown on the More card
+function scheduleSync(){
+  if (!S.syncUrl) return;
+  clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(pushSync, 4000);
+}
+async function pushSync(){
+  if (!S.syncUrl) return;
+  try {
+    const state = {};
+    PERSISTED.forEach(p => { if (p !== "photos") state[p] = S[p]; }); // photos stay on-device
+    const res = await fetch(S.syncUrl, {
+      method: "POST",
+      headers: {"Content-Type": "text/plain;charset=utf-8"}, // simple request: no CORS preflight
+      body: JSON.stringify({v: 6, state, rows: buildRows()})
+    });
+    const out = await res.json();
+    if (!out.ok) throw new Error(out.error || "sync rejected");
+    _syncStatus = "Synced " + new Date().toLocaleTimeString("en-IN", {hour: "2-digit", minute: "2-digit"});
+  } catch(e){
+    console.warn("sync failed", e);
+    _syncStatus = "Offline — will retry on next change";
+  }
+  if (S.tab === "more") render();
+}
+async function pullSync(){
+  if (!S.syncUrl) return;
+  if (!confirm("Replace this device's log with the latest from your Google Sheet?")) return;
+  try {
+    toast("Pulling…");
+    const res = await fetch(S.syncUrl);
+    const out = await res.json();
+    if (!out.ok || !out.state) throw new Error(out.error || "no backup in sheet yet");
+    const localPhotos = S.photos;          // photos never travel; keep this device's
+    applyState(out.state);
+    S.photos = localPhotos;
+    persist(); render();
+    toast("Pulled — up to date with your Sheet", "accent", "check");
+  } catch(e){ console.error(e); toast("Pull failed — check the sync URL"); }
+}
+function connectSync(){
+  const u = prompt("Paste your Apps Script Web app URL (ends in /exec).\nSetup guide: docs/sync/SETUP.md in the repo.", S.syncUrl || "");
+  if (u === null) return;
+  const url = u.trim();
+  if (url && !/^https:\/\/script\.google(?:usercontent)?\.com\/.+/.test(url)) return toast("That doesn't look like an Apps Script URL");
+  S.syncUrl = url;
+  persist(); render();
+  if (url){ toast("Connected — syncing now"); pushSync(); }
+}
+function disconnectSync(){
+  if (!confirm("Disconnect Google Sheet sync? Local data stays.")) return;
+  S.syncUrl = ""; _syncStatus = "";
+  persist(); render();
 }
 
 // ─── JSON backup ───
